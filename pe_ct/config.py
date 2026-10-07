@@ -158,6 +158,8 @@ class Config:
 
 
 KAGGLE_INPUT_ROOT = "/kaggle/input"
+# Where Kaggle mounts the competition today (train.csv, train/<study>/<series>/<sop>.dcm).
+KAGGLE_COMPETITION_DIR = "/kaggle/input/competitions/rsna-str-pulmonary-embolism-detection"
 
 
 def detect_kaggle_input(root: str = KAGGLE_INPUT_ROOT) -> str:
@@ -166,6 +168,8 @@ def detect_kaggle_input(root: str = KAGGLE_INPUT_ROOT) -> str:
     Competitions usually mount at ``/kaggle/input/<slug>/``, but the depth is not guaranteed.
     The search is depth-limited on purpose: a recursive glob would walk 1.9M DICOM files.
     """
+    if root == KAGGLE_INPUT_ROOT and os.path.exists(os.path.join(KAGGLE_COMPETITION_DIR, "train.csv")):
+        return KAGGLE_COMPETITION_DIR
     hits = []
     for depth in range(1, 4):
         hits += glob.glob(os.path.join(root, *(["*"] * depth), "train.csv"))

@@ -15,11 +15,27 @@ from scripts.nb import nb00, nb01, nb02, nb03, nb04, nb05  # noqa: E402
 from scripts.nb.tools import write_notebook  # noqa: E402
 
 
+def check_code_cells(cells, title: str) -> None:
+    """Fail the build if any code cell has a syntax error (IPython magics are stripped first)."""
+    import ast
+
+    for i, cell in enumerate(cells):
+        if cell.cell_type != "code":
+            continue
+        src = "\n".join(l for l in cell.source.splitlines() if not l.lstrip().startswith(("%", "!")))
+        try:
+            ast.parse(src)
+        except SyntaxError as exc:
+            raise SystemExit(f"{title}: code cell {i} does not parse: {exc}\n{cell.source}")
+
+
 def main():
     out_dir = REPO / "notebooks"
     for mod in [nb00, nb01, nb02, nb03, nb04, nb05]:
-        path = write_notebook(mod.cells(), out_dir / f"{mod.TITLE}.ipynb", mod.TITLE)
-        print("wrote", path.relative_to(REPO), f"({len(mod.cells())} cells)")
+        cells = mod.cells()
+        check_code_cells(cells, mod.TITLE)
+        path = write_notebook(cells, out_dir / f"{mod.TITLE}.ipynb", mod.TITLE)
+        print("wrote", path.relative_to(REPO), f"({len(cells)} cells)")
 
 
 if __name__ == "__main__":
