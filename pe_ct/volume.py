@@ -52,26 +52,18 @@ def _header_value(ds, keyword: str, default=""):
     return str(value).strip()
 
 
-def read_series(dcm_dir) -> tuple:
-    """Read one DICOM series directory into ``(sitk.Image in LPI, sop_uids_in_z_order, header)``.
+def _read_sorted_datasets(dcm_dir, stop_before_pixels: bool) -> tuple:
+    """All slices of one series sorted by position along the slice normal, plus geometry.
 
-    Every slice is read with pydicom (GDCM's series scanner rejects this dataset's
-    anonymised, non-standard UIDs on some scanners). Slices are sorted by their
-    position along the slice normal, intensities are mapped to HU with each file's
-    RescaleSlope/Intercept, and the 3D geometry (spacing, origin, direction) is
-    built from the headers. The volume is then reoriented to LPI with SimpleITK
-    and we record which file ended up at which z index.
-
-    The true per-slice positions and gap statistics are returned in the header so
-    studies with missing slices can be flagged (the array is simply the stack of
-    the files that exist; nothing is interpolated).
+    Returns ``(datasets, positions, along, geometry)`` where ``geometry`` holds the
+    in-plane spacing, the slice step and the direction matrix (columns = image axes in LPS).
     """
     import pydicom
 
     files = sorted(Path(dcm_dir).glob("*.dcm"))
     if not files:
         raise IOError(f"no DICOM files in {dcm_dir}")
-    datasets = [pydicom.dcmread(str(f)) for f in files]
+    datasets = [pydicom.dcmread(str(f), stop_before_pixels=stop_before_pixels) for f in files]
 
     series = {str(ds.get("SeriesInstanceUID", "")) for ds in datasets}
     if len(series) != 1:
@@ -98,32 +90,30 @@ def read_series(dcm_dir) -> tuple:
     shapes = {(int(ds.Rows), int(ds.Columns)) for ds in datasets}
     if len(shapes) != 1:
         raise IOError(f"slices have different shapes: {shapes}")
-
-    slices = []
-    for ds in datasets:
-        slope = _to_float(ds.get("RescaleSlope", 1.0), 1.0)
-        intercept = _to_float(ds.get("RescaleIntercept", 0.0), 0.0)
-        slices.append(ds.pixel_array.astype(np.float32) * slope + intercept)
-    vol = np.stack(slices).astype(np.float32)  # (z, y, x), z increasing along the normal
+    sop_uids = [str(ds.SOPInstanceUID) for ds in datasets]
+    if len(set(sop_uids)) != len(sop_uids):
+        raise IOError("duplicate SOPInstanceUIDs in series")
 
     row_spacing, col_spacing = (float(v) for v in datasets[0].PixelSpacing)  # (y, x)
     steps = np.diff(along)
     dz = float(np.median(np.abs(steps))) if len(steps) else _to_float(datasets[0].get("SliceThickness", 1.0), 1.0)
     if not np.isfinite(dz) or dz <= 0:
         raise IOError("could not determine slice spacing")
+    geometry = {
+        "rows": int(datasets[0].Rows),
+        "cols": int(datasets[0].Columns),
+        "spacing": (col_spacing, row_spacing, dz),
+        "origin": tuple(float(v) for v in positions[0]),
+        "direction": tuple(float(v) for v in np.stack([row_dir, col_dir, normal], axis=1).reshape(-1)),
+    }
+    return datasets, positions, along, geometry
 
-    raw = sitk.GetImageFromArray(vol)
-    raw.SetSpacing((col_spacing, row_spacing, dz))
-    raw.SetOrigin(tuple(float(v) for v in positions[0]))
-    direction = np.stack([row_dir, col_dir, normal], axis=1)  # columns = image axes in LPS
-    raw.SetDirection(tuple(float(v) for v in direction.reshape(-1)))
 
+def _orient_and_match(raw: sitk.Image, datasets: list, positions: np.ndarray, along: np.ndarray) -> tuple:
+    """Reorient ``raw`` to LPI and work out which file landed at which z index."""
     n = len(datasets)
     sop_raw = [str(ds.SOPInstanceUID) for ds in datasets]
-    if len(set(sop_raw)) != n:
-        raise IOError("duplicate SOPInstanceUIDs in series")
     z_raw = np.array([raw.TransformIndexToPhysicalPoint((0, 0, i))[2] for i in range(n)])
-    z_true_raw = positions[:, 2]
 
     oriented = sitk.DICOMOrient(raw, STORED_ORIENTATION)
     if oriented.GetSize()[2] != n:
@@ -133,7 +123,7 @@ def read_series(dcm_dir) -> tuple:
     if len(set(match.tolist())) != n or np.abs(z_oriented - z_raw[match]).max() > 0.01:
         raise IOError("could not match slices to files after reorientation")
     sop_uids = [sop_raw[i] for i in match]
-    z_true = z_true_raw[match]
+    z_true = positions[match, 2]
 
     first = datasets[0]
     header = {name: _header_value(first, keyword) for name, keyword in DICOM_TAGS.items()}
@@ -146,6 +136,48 @@ def read_series(dcm_dir) -> tuple:
     header["z_positions_true_mm"] = [float(z) for z in z_true]
     header.update(spacing_stats(along))
     return oriented, sop_uids, header
+
+
+def _apply_geometry(image: sitk.Image, geometry: dict) -> sitk.Image:
+    image.SetSpacing(geometry["spacing"])
+    image.SetOrigin(geometry["origin"])
+    image.SetDirection(geometry["direction"])
+    return image
+
+
+def read_series(dcm_dir) -> tuple:
+    """Read one DICOM series directory into ``(sitk.Image in LPI, sop_uids_in_z_order, header)``.
+
+    Every slice is read with pydicom (GDCM's series scanner rejects this dataset's
+    anonymised, non-standard UIDs on some scanners). Slices are sorted by their
+    position along the slice normal, intensities are mapped to HU with each file's
+    RescaleSlope/Intercept, and the 3D geometry (spacing, origin, direction) is
+    built from the headers. The volume is then reoriented to LPI with SimpleITK
+    and we record which file ended up at which z index.
+
+    The true per-slice positions and gap statistics are returned in the header so
+    studies with missing slices can be flagged (the array is simply the stack of
+    the files that exist; nothing is interpolated).
+    """
+    datasets, positions, along, geometry = _read_sorted_datasets(dcm_dir, stop_before_pixels=False)
+    slices = []
+    for ds in datasets:
+        slope = _to_float(ds.get("RescaleSlope", 1.0), 1.0)
+        intercept = _to_float(ds.get("RescaleIntercept", 0.0), 0.0)
+        slices.append(ds.pixel_array.astype(np.float32) * slope + intercept)
+    raw = _apply_geometry(sitk.GetImageFromArray(np.stack(slices).astype(np.float32)), geometry)
+    return _orient_and_match(raw, datasets, positions, along)
+
+
+def read_series_headers(dcm_dir) -> tuple:
+    """Like :func:`read_series` but without decoding pixels: ``(geometry-only image, sop_uids, header)``.
+
+    Roughly ten times faster; the returned image has the right size, spacing, origin and
+    direction (its voxels are zeros), so :func:`build_meta` works on it unchanged.
+    """
+    datasets, positions, along, geometry = _read_sorted_datasets(dcm_dir, stop_before_pixels=True)
+    raw = _apply_geometry(sitk.Image([geometry["cols"], geometry["rows"], len(datasets)], sitk.sitkUInt8), geometry)
+    return _orient_and_match(raw, datasets, positions, along)
 
 
 def scanner_proxy(manufacturer: str, convolution_kernel: str) -> str:

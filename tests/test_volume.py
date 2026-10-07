@@ -150,3 +150,12 @@ def test_view_helpers(tiny_volume):
     assert volume.coronal_mip(vol).max() == 300
     assert volume.aspect_coronal(meta) == pytest.approx(2.5)
     assert volume.normalized_z([0, 19], 20).tolist() == [0.0, 1.0]
+
+
+def test_read_series_headers_matches_full_read(real_series_dir):
+    img, sops, h = volume.read_series(real_series_dir)
+    img2, sops2, h2 = volume.read_series_headers(real_series_dir)
+    assert sops == sops2
+    m, m2 = volume.build_meta(img, sops, h, UID, "s"), volume.build_meta(img2, sops2, h2, UID, "s")
+    assert m == m2
+    assert img2.GetSize() == img.GetSize() and img2.GetSpacing() == img.GetSpacing()

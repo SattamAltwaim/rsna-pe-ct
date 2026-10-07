@@ -42,14 +42,15 @@ tests/                 pytest, CPU-only; synthetic volumes + an 8-slice real fix
 2. Paste or upload a notebook from `notebooks/` and run it. The code detects Kaggle: DICOMs are read
    in place from `/kaggle/input/...`, outputs go to `/kaggle/working/rsna-pe/`.
 3. Labels and splits are rebuilt automatically (seeded, identical) by any notebook that cannot find
-   them, so notebook 00 is optional on Kaggle. Notebook 01 is optional too: the EDA notebook builds
-   any missing volume itself.
+   them, so notebook 00 is optional on Kaggle. **Skip notebook 01 on Kaggle**: the EDA notebook reads
+   volumes straight from the mounted dataset (metadata from headers, pixels decoded on demand), so no
+   volume shards are built or stored there.
 4. **Passing results between notebooks:** after notebook 03 finishes, *Save Version* (run all). In
    notebooks 04 and 05, **Add Input -> Your Work -> the 03 notebook's output**; its `rsna-pe/` folder
    is then symlinked into `/kaggle/working/rsna-pe/` by the CONFIG cell. Same for 04 -> 05.
    Alternatively run 03, 04 and 05 as one long GPU session, in sequence.
-5. Mind Kaggle's output size limit (20 GB): the 300 EDA volumes are about 18 GB, embeddings
-   under 1 GB. Scratch files (DICOM copies, shard builds) go to `/tmp` and are not persisted.
+5. Kaggle's output limit is 20 GB; the embeddings are under 1 GB. Scratch files go to `/tmp` and
+   are not persisted.
 
 ## Running on Colab
 

@@ -37,10 +37,10 @@ def cells():
         md("""
         ## Load labels, splits and the EDA volumes
 
-        Any EDA volume that the previous notebook did not build is built here first (on Kaggle
-        that is the normal path: the DICOMs are already on disk). The finished shards are then
-        copied to local disk once (fast random access afterwards). Volumes are read through a
-        small store object, so no cell handles tar files.
+        Volumes are read through a small store object, so no cell handles files directly. On
+        Kaggle the store reads straight from the mounted dataset: metadata comes from the DICOM
+        headers (fast) and a volume is decoded only when a plot needs it. On Colab the store
+        reads the shards built by the previous notebook (building any that are missing).
         """),
         code("""
         import numpy as np
@@ -50,14 +50,12 @@ def cells():
 
         studies, split_table = pipeline.ensure_labels_and_splits(cfg)
         slice_index = labels.SliceLabelIndex(pipeline.load_train(cfg))
-        pipeline.ensure_eda_volumes(cfg, studies, split_table, pipeline.make_locator(cfg), slice_index, progress=tqdm)
-        storage.prepare_local(cfg.volumes_eda_dir, cfg.work / "volumes_eda", progress=tqdm)
-        store = storage.VolumeStore(cfg.work / "volumes_eda" / "cache")
+        store = pipeline.eda_volume_store(cfg, studies, split_table, slice_index, pipeline.make_locator(cfg), progress=tqdm)
         eda_uids = store.uids()
-        print(len(studies), "labelled studies |", len(eda_uids), "EDA volumes on local disk")
+        print(len(studies), "labelled studies |", len(eda_uids), "EDA volumes available |", type(store).__name__)
         """),
         code("""
-        metas = {u: store.load_meta(u) for u in eda_uids}
+        metas = {u: store.load_meta(u) for u in tqdm(eda_uids, desc="metadata")}
         acq = pd.DataFrame([{
             "study_uid": u, "y": m["y"], "n_slices": m["shape_zyx"][0],
             "slice_spacing_mm": m["slice_spacing_median_mm"], "inplane_mm": m["spacing_xyz_mm"][0],

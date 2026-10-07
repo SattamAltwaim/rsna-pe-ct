@@ -204,3 +204,17 @@ def test_detect_kaggle_input_handles_nesting_and_absence(tmp_path):
         pipeline.load_train(cfg)
     with pytest.raises(FileNotFoundError):
         pipeline.fetch_study(cfg, None, UID, cfg.work)
+
+
+def test_live_volume_store_on_kaggle(kaggle_world):
+    cfg, _, _ = kaggle_world
+    studies, split_table = pipeline.ensure_labels_and_splits(cfg, log=lambda *a: None)
+    split_table["in_eda"] = split_table.study_uid == UID
+    slice_index = labels.SliceLabelIndex(pipeline.load_train(cfg))
+    store = pipeline.eda_volume_store(cfg, studies, split_table, slice_index, log=lambda *a: None)
+    assert isinstance(store, storage.LiveVolumeStore) and store.uids() == [UID] and store.has(UID)
+    meta = store.load_meta(UID)
+    assert meta["slice_labels"] == [0, 1, 1, 1, 0, 0, 0, 0] and meta["shape_zyx"] == [8, 512, 512] and "hu_sanity" not in meta
+    vol, meta2 = store.load_volume(UID)
+    assert vol.shape == (8, 512, 512) and meta2["slice_labels"] == meta["slice_labels"] and "hu_sanity" in meta2
+    assert not list(cfg.volumes_eda_dir.glob("*.tar"))  # nothing was built

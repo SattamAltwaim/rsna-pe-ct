@@ -286,6 +286,41 @@ class VolumeStore:
         return vol, self.load_meta(uid)
 
 
+class LiveVolumeStore:
+    """Same interface as :class:`VolumeStore`, but reads straight from DICOM folders on disk.
+
+    Used on Kaggle, where the dataset is mounted: metadata comes from the headers
+    (fast, cached) and a volume is decoded only when asked for.
+    """
+
+    def __init__(self, cfg, studies, slice_index, uids):
+        self.cfg = cfg
+        self.slice_index = slice_index
+        self._uids = list(uids)
+        self._by_uid = studies if studies.index.name == "study_uid" else studies.set_index("study_uid")
+        self._meta_cache: dict = {}
+
+    def uids(self) -> list:
+        return sorted(self._uids)
+
+    def has(self, uid: str) -> bool:
+        return uid in self._uids
+
+    def load_meta(self, uid: str) -> dict:
+        from pe_ct import pipeline
+
+        if uid not in self._meta_cache:
+            self._meta_cache[uid] = pipeline.study_meta_only(self.cfg, self.slice_index, uid, self._by_uid.loc[uid])
+        return self._meta_cache[uid]
+
+    def load_volume(self, uid: str):
+        from pe_ct import pipeline, volume
+
+        image, meta, _ = pipeline.process_study(self.cfg, None, self.slice_index, uid, self._by_uid.loc[uid], self.cfg.work / "dicom")
+        self._meta_cache[uid] = meta
+        return volume.image_to_hu_array(image), meta
+
+
 # ---------------------------------------------------------------------------
 # npz shards (embeddings)
 # ---------------------------------------------------------------------------

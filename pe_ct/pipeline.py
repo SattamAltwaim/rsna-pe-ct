@@ -73,6 +73,21 @@ def build_volume(dcm_dir, study_uid: str, study_row, slice_labels) -> tuple:
     return image, meta
 
 
+def study_meta_only(cfg: Config, slice_index: plabels.SliceLabelIndex, study_uid: str, study_row) -> dict:
+    """Metadata + aligned slice labels from the DICOM headers only (no pixel decoding).
+
+    Only for sources where the files are already on disk (Kaggle); about ten times
+    faster than :func:`process_study`. Everything except ``hu_sanity`` matches it.
+    """
+    uid = str(study_uid)
+    dcm_dir, _ = fetch_study(cfg, None, uid, cfg.work, series_uid=str(study_row["series_uid"]))
+    image, sop_uids, header = volume.read_series_headers(dcm_dir)
+    meta = volume.build_meta(image, sop_uids, header, uid, str(study_row["series_uid"]))
+    meta["slice_labels"] = plabels.align_slice_labels(sop_uids, slice_index.for_study(uid)).tolist()
+    meta.update(study_meta_from_row(study_row))
+    return meta
+
+
 def process_study(cfg: Config, locator, slice_index: plabels.SliceLabelIndex, study_uid: str, study_row, work_dir) -> tuple:
     """fetch -> volume -> labels. Returns ``(image, meta, timings)``; DICOMs are deleted.
 
@@ -201,6 +216,25 @@ def ensure_eda_volumes(cfg: Config, studies, split_table, locator, slice_index, 
         return None
     log("EDA volumes incomplete: building them now")
     return run_volume_download(cfg, studies, uids, locator, slice_index, failure_log, progress=progress, log=log)
+
+
+def eda_volume_store(cfg: Config, studies, split_table, slice_index, locator=None, progress=None, log=print):
+    """The object NB02 reads EDA volumes from, chosen by what is cheapest.
+
+    * Finished shards exist for every EDA study -> copy them local once, read from the cache.
+    * Kaggle (files on disk) -> read volumes on demand, metadata from headers; nothing is built.
+    * Otherwise (S3) -> build the missing shards first, then read from the cache.
+    """
+    uids = split_table.loc[split_table["in_eda"], "study_uid"].tolist()
+    failure_log = storage.FailureLog(cfg.failures_csv("01_download_subset"))
+    pending = pending_uids(uids, cfg.volumes_eda_dir, "tar", failure_log)
+    if pending and cfg.source == "kaggle":
+        log(f"reading {len(uids)} EDA volumes directly from the mounted dataset (no shards needed)")
+        return storage.LiveVolumeStore(cfg, studies, slice_index, uids)
+    if pending:
+        ensure_eda_volumes(cfg, studies, split_table, locator, slice_index, progress=progress, log=log)
+    storage.prepare_local(cfg.volumes_eda_dir, cfg.work / "volumes_eda", progress=progress)
+    return storage.VolumeStore(cfg.work / "volumes_eda" / "cache")
 
 
 def storage_json(meta: dict) -> bytes:
