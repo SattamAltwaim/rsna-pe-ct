@@ -200,6 +200,24 @@ def bar_counts(ax, counts, colors=None, title=None, xlabel=None, horizontal=Fals
     return bars
 
 
+def confusion_matrix_fig(cm, class_names=("no PE", "PE"), title=None):
+    """Counts (left) and row-normalized (right) confusion matrices."""
+    cm = np.asarray(cm)
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.8))
+    for ax, mat, sub, fmt in [(axes[0], cm, "counts", "d"), (axes[1], cm / np.maximum(cm.sum(1, keepdims=True), 1), "row-normalized (recall on the diagonal)", ".2f")]:
+        ax.imshow(mat, cmap="Blues")
+        ax.set_title(sub, fontsize=9)
+        ax.set_xticks(range(len(class_names))); ax.set_xticklabels([f"pred {c}" for c in class_names])
+        ax.set_yticks(range(len(class_names))); ax.set_yticklabels([f"true {c}" for c in class_names])
+        for i in range(len(class_names)):
+            for j in range(len(class_names)):
+                ax.text(j, i, format(mat[i, j], fmt), ha="center", va="center", color="w" if mat[i, j] > mat.max() / 2 else "k")
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+
+
 def save_fig(fig, figures_dir, notebook: str, name: str, dpi: int = 130) -> Path:
     """``figures/<notebook>/<name>.png``; returns the path."""
     out = Path(figures_dir) / notebook / f"{name}.png"

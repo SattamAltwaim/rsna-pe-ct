@@ -11,7 +11,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from scripts.nb import nb00, nb01, nb02, nb03, nb04, nb05  # noqa: E402
+from scripts.nb import nb00, nb01, nb02, nb03, nb04, nb05, nb_eda, nb_finetune  # noqa: E402
 from scripts.nb.tools import write_notebook  # noqa: E402
 
 
@@ -30,12 +30,14 @@ def check_code_cells(cells, title: str) -> None:
 
 
 def main():
-    out_dir = REPO / "notebooks"
-    for mod in [nb00, nb01, nb02, nb03, nb04, nb05]:
-        cells = mod.cells()
-        check_code_cells(cells, mod.TITLE)
-        path = write_notebook(cells, out_dir / f"{mod.TITLE}.ipynb", mod.TITLE)
-        print("wrote", path.relative_to(REPO), f"({len(cells)} cells)")
+    # The two notebooks of the Kaggle workflow, plus the earlier Colab/Drive series kept for reference.
+    targets = [(REPO / "notebooks", [nb_eda, nb_finetune]), (REPO / "notebooks" / "legacy_colab", [nb00, nb01, nb02, nb03, nb04, nb05])]
+    for out_dir, mods in targets:
+        for mod in mods:
+            cells = mod.cells()
+            check_code_cells(cells, mod.TITLE)
+            path = write_notebook(cells, out_dir / f"{mod.TITLE}.ipynb", mod.TITLE)
+            print("wrote", path.relative_to(REPO), f"({len(cells)} cells)")
 
 
 if __name__ == "__main__":
