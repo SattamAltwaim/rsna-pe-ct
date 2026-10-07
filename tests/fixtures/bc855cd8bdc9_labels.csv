@@ -1,0 +1,9 @@
+StudyInstanceUID,SeriesInstanceUID,SOPInstanceUID,pe_present_on_image,negative_exam_for_pe,qa_motion,qa_contrast,flow_artifact,rv_lv_ratio_gte_1,rv_lv_ratio_lt_1,leftsided_pe,chronic_pe,true_filling_defect_not_pe,rightsided_pe,acute_and_chronic_pe,central_pe,indeterminate
+bc855cd8bdc9,bab8e5153e7b,6d166dbdca41,0,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,839f8ea53d80,1,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,8b2ed6fd8a66,0,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,4131ac07ed1d,0,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,adca635aaea1,1,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,031780a5713c,1,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,be87f6ce399c,0,0,0,0,0,0,1,0,0,0,1,0,0,0
+bc855cd8bdc9,bab8e5153e7b,5fafbc93b73e,0,0,0,0,0,0,1,0,0,0,1,0,0,0

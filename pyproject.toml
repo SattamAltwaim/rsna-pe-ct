@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pe_ct"
+version = "0.1.0"
+description = "PE detection on CTPA with a frozen 3D CT foundation model (SPECTRE) and a linear probe"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "SimpleITK",
+    "pydicom",
+    "remotezip",
+    "requests",
+    "tqdm",
+    "ipywidgets",
+    "torch",
+]
+
+[project.optional-dependencies]
+# NB03 (embedding extraction) and NB05 (heatmaps) need the backbone.
+embed = ["spectre-fm[inference]", "umap-learn"]
+dev = ["pytest", "nbformat"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pe_ct"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
