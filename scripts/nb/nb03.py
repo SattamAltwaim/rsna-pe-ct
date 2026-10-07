@@ -126,7 +126,7 @@ def cells():
         by_uid = studies.set_index("study_uid")
         for uid in dev_uids[:3]:
             t0 = time.time()
-            image, meta, timings = pipeline.process_study(cfg, locator, slice_index, by_uid.loc[uid], cfg.work / "dicom")
+            image, meta, timings = pipeline.process_study(cfg, locator, slice_index, uid, by_uid.loc[uid], cfg.work / "dicom")
             rec = embed.embed_image(model, image, cfg.resample_spacing)
             print(f"{uid}: cls {rec['cls'].shape}, crops {rec['n_crops']} grid {tuple(rec['grid'])}, "
                   f"gpu {rec['t_gpu_s']:.1f}s, download {timings['t_download_s']:.1f}s, decode {timings['t_decode_s']:.1f}s, total {time.time() - t0:.1f}s")

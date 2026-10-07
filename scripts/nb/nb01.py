@@ -64,7 +64,7 @@ def cells():
         from pe_ct import pipeline, volume
 
         uid = eda_uids[0]
-        image, meta, timings = pipeline.process_study(cfg, locator, slice_index, studies.set_index("study_uid").loc[uid], cfg.work / "dicom")
+        image, meta, timings = pipeline.process_study(cfg, locator, slice_index, uid, studies.set_index("study_uid").loc[uid], cfg.work / "dicom")
         vol = volume.image_to_hu_array(image)
         print("study", uid, "| shape (z, y, x)", vol.shape, "| spacing (x, y, z) mm", [round(s, 3) for s in meta["spacing_xyz_mm"]])
         print("timings", timings, "| scanner", meta["manufacturer"], "| slice thickness", meta["slice_thickness_mm"], "mm")

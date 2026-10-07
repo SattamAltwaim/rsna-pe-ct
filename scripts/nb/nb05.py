@@ -85,7 +85,7 @@ def cells():
         wanted = list(dict.fromkeys(top_tp.index.tolist() + top_fn.index.tolist() + top_fp.index.tolist()))
         locator = pio.StudyLocator(pd.read_parquet(cfg.zip_index_path))
         slice_index = labels.SliceLabelIndex(labels.load_train_csv(cfg.train_csv))
-        vols = pipeline.fetch_volumes_for_uids(cfg, studies.reset_index(), wanted, locator, slice_index, progress=tqdm)
+        vols = pipeline.fetch_volumes_for_uids(cfg, studies, wanted, locator, slice_index, progress=tqdm)
         print(len(vols), "volumes fetched")
         """),
         code("""

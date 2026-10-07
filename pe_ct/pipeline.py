@@ -16,11 +16,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from pe_ct import io as pio
 from pe_ct import labels as plabels
 from pe_ct import storage, volume
 from pe_ct.config import QA_COLS, SUBLABEL_COLS, Config
+
+
+def _by_uid(studies) -> "pd.DataFrame":
+    """Study table indexed by ``study_uid`` whether or not it already is."""
+    return studies if studies.index.name == "study_uid" else studies.set_index("study_uid")
 
 
 def study_meta_from_row(study_row) -> dict:
@@ -34,6 +40,8 @@ def study_meta_from_row(study_row) -> dict:
 
 def fetch_study(cfg: Config, locator: pio.StudyLocator, study_uid: str, work_dir) -> Path:
     """Download one study's DICOMs into ``work_dir/<uid>/``; returns that directory."""
+    if study_uid not in locator:
+        raise KeyError(f"{study_uid} not in zip index")
     entries = locator.entries(study_uid)
     dest = Path(work_dir) / study_uid
     if dest.exists():
@@ -52,9 +60,12 @@ def build_volume(dcm_dir, study_uid: str, study_row, slice_labels) -> tuple:
     return image, meta
 
 
-def process_study(cfg: Config, locator, slice_index: plabels.SliceLabelIndex, study_row, work_dir) -> tuple:
-    """fetch -> volume -> labels. Returns ``(image, meta, timings)``; DICOMs are deleted."""
-    uid = str(study_row["study_uid"])
+def process_study(cfg: Config, locator, slice_index: plabels.SliceLabelIndex, study_uid: str, study_row, work_dir) -> tuple:
+    """fetch -> volume -> labels. Returns ``(image, meta, timings)``; DICOMs are deleted.
+
+    ``study_row`` is the study's row of the study table (indexed by ``study_uid`` or not).
+    """
+    uid = str(study_uid)
     t0 = time.time()
     dcm_dir = fetch_study(cfg, locator, uid, work_dir)
     t1 = time.time()
@@ -79,7 +90,7 @@ def pending_uids(all_uids, shard_dir, ext: str, failure_log: storage.FailureLog)
 
 def run_volume_download(cfg: Config, studies, uids, locator, slice_index, failure_log, progress=None, log=print) -> dict:
     """Resumable loop writing ``volumes_eda/shard_XXX.tar`` (+ markers). Returns a summary."""
-    by_uid = studies.set_index("study_uid")
+    by_uid = _by_uid(studies)
     todo = pending_uids(uids, cfg.volumes_eda_dir, "tar", failure_log)
     log(f"{len(uids)} requested, {len(uids) - len(todo)} already done/failed, {len(todo)} to do")
     work = cfg.work / "dicom"
@@ -92,7 +103,7 @@ def run_volume_download(cfg: Config, studies, uids, locator, slice_index, failur
             writer = storage.TarShardWriter(cfg.volumes_eda_dir, storage.next_shard_index(cfg.volumes_eda_dir, "tar"), build_dir=build)
         t0 = time.time()
         try:
-            image, meta, timings = process_study(cfg, locator, slice_index, by_uid.loc[uid], work)
+            image, meta, timings = process_study(cfg, locator, slice_index, uid, by_uid.loc[uid], work)
             meta.update(timings)
             nii = build / f"{uid}.nii.gz"
             volume.save_nifti(image, nii)
@@ -160,7 +171,7 @@ def run_embedding_extraction(cfg: Config, model, studies, uids, locator, slice_i
     """Resumable streaming loop: CPU prefetch of the next studies while the GPU embeds the current one."""
     from pe_ct import embed
 
-    by_uid = studies.set_index("study_uid")
+    by_uid = _by_uid(studies)
     todo = pending_uids(uids, cfg.embeddings_dir, "npz", failure_log)
     log(f"{len(uids)} requested, {len(uids) - len(todo)} already done/failed, {len(todo)} to do")
     work = cfg.work / "dicom"
@@ -169,7 +180,7 @@ def run_embedding_extraction(cfg: Config, model, studies, uids, locator, slice_i
     writer = None
 
     def prepare(uid):
-        return process_study(cfg, locator, slice_index, by_uid.loc[uid], work / "prefetch")
+        return process_study(cfg, locator, slice_index, uid, by_uid.loc[uid], work / "prefetch")
 
     iterator = progress(todo) if progress is not None else todo
     with ThreadPoolExecutor(max_workers=prefetch) as pool:
@@ -209,10 +220,10 @@ def run_embedding_extraction(cfg: Config, model, studies, uids, locator, slice_i
 
 def fetch_volumes_for_uids(cfg: Config, studies, uids, locator, slice_index, progress=None) -> dict:
     """Small helper for NB05 galleries: ``{uid: (volume int16, meta)}`` for a handful of studies."""
-    by_uid = studies.set_index("study_uid")
+    by_uid = _by_uid(studies)
     out = {}
     iterator = progress(uids) if progress is not None else uids
     for uid in iterator:
-        image, meta, _ = process_study(cfg, locator, slice_index, by_uid.loc[uid], cfg.work / "dicom")
+        image, meta, _ = process_study(cfg, locator, slice_index, uid, by_uid.loc[uid], cfg.work / "dicom")
         out[uid] = (volume.image_to_hu_array(image), meta)
     return out
