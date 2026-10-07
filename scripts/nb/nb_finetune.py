@@ -58,7 +58,8 @@ def cells():
         from pe_ct import colab, embed
 
         report = colab.session_report(cfg)
-        model = embed.load_model("spectre-large")
+        MODEL_NAME = os.environ.get("PE_CT_MODEL", "spectre-large")   # a random "spectre-small" is used only for local smoke tests
+        model = embed.load_model(MODEL_NAME, pretrained=MODEL_NAME == "spectre-large")
         embed.model_info(model)
         """),
         code("""

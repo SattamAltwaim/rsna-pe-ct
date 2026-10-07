@@ -35,7 +35,12 @@ CROP_SIZE = (128, 128, 64)  # (H, W, D) = (R, A, S) voxels
 
 
 def load_model(name: str = "spectre-large", device=None, dtype=None, pretrained: bool = True):
-    """Load SPECTRE in eval mode. bf16 on GPU by default, fp32 on CPU."""
+    """Load SPECTRE in eval mode. bf16 on GPU (fp16 where bf16 is unsupported), fp32 on CPU.
+
+    The published weights are pickle ``.pt`` state dicts, which recent ``huggingface_hub``
+    versions refuse to load through the library's own path (safetensors only), so the two
+    files are fetched from the Hub and loaded here with ``torch.load(weights_only=True)``.
+    """
     from spectre import SpectreImageFeatureExtractor
 
     if device is None:
@@ -45,7 +50,42 @@ def load_model(name: str = "spectre-large", device=None, dtype=None, pretrained:
             dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         else:
             dtype = torch.float32
-    return SpectreImageFeatureExtractor.from_pretrained(name, pretrained=pretrained, device=device, dtype=dtype)
+    model = SpectreImageFeatureExtractor.from_pretrained(name, pretrained=False)  # architecture, random init
+    if pretrained:
+        from spectre.presets import get_preset
+
+        preset = get_preset(name)
+        if not preset.has_pretrained_weights:
+            raise ValueError(f"preset {name!r} has no published weights")
+        load_weights_from_hub(model.backbone, preset.backbone_weights)
+        load_weights_from_hub(model.feature_combiner, preset.feature_combiner_weights)
+    return model.to(device=device, dtype=dtype).eval()
+
+
+def parse_hf_url(url: str) -> tuple:
+    """``https://huggingface.co/<owner>/<repo>/resolve/<rev>/<file>[?...]`` -> ``(repo_id, filename, revision)``."""
+    from urllib.parse import unquote, urlparse
+
+    parts = urlparse(str(url)).path.strip("/").split("/")
+    if len(parts) < 2:
+        raise ValueError(f"not a Hugging Face file URL: {url}")
+    repo_id, revision, filename = "/".join(parts[:2]), None, parts[-1]
+    if len(parts) >= 5 and parts[2] in ("resolve", "blob"):
+        revision, filename = unquote(parts[3]), "/".join(parts[4:])
+    return repo_id, filename, revision
+
+
+def load_weights_from_hub(module: torch.nn.Module, url: str) -> None:
+    """Download one checkpoint from the Hub (cached) and load it strictly into ``module``."""
+    from huggingface_hub import hf_hub_download
+
+    repo_id, filename, revision = parse_hf_url(url)
+    path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+    state = torch.load(path, map_location="cpu", weights_only=True)
+    for key in ("state_dict", "model"):
+        if isinstance(state, dict) and key in state and isinstance(state[key], dict):
+            state = state[key]
+    module.load_state_dict(state, strict=True)
 
 
 def model_info(model) -> dict:

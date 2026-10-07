@@ -115,3 +115,43 @@ def test_resample_image_changes_size(tiny_volume):
     out = embed.resample_image(img, (1.6, 1.6, 1.0))
     assert out.GetSize() == (16, 16, 40)
     assert out.GetSpacing() == (1.6, 1.6, 1.0)
+
+
+def test_parse_hf_url():
+    repo, fn, rev = embed.parse_hf_url("https://huggingface.co/cclaess/SPECTRE/resolve/main/spectre_combiner_feature_vit_large.pt?download=true")
+    assert (repo, fn, rev) == ("cclaess/SPECTRE", "spectre_combiner_feature_vit_large.pt", "main")
+    with pytest.raises(ValueError):
+        embed.parse_hf_url("https://huggingface.co/")
+
+
+def _weights_cached() -> bool:
+    try:
+        from huggingface_hub import hf_hub_download
+
+        for fn in ["spectre_backbone_vit_large_patch16_128.pt", "spectre_combiner_feature_vit_large.pt"]:
+            hf_hub_download(repo_id="cclaess/SPECTRE", filename=fn, local_files_only=True)
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _weights_cached(), reason="SPECTRE-Large weights not in the local Hub cache")
+def test_real_spectre_large_loads_and_embeds_fixture():
+    """The published pickle checkpoints load strictly and produce finite embeddings on a real study."""
+    import tarfile
+
+    from tests.conftest import FIXTURES
+
+    model = embed.load_model("spectre-large", device="cpu")
+    info = embed.model_info(model)
+    assert info["embed_dim"] == 1080 and info["n_params_backbone_M"] > 300
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with tarfile.open(FIXTURES / "bc855cd8bdc9_8slices.tar.gz") as tar:
+            tar.extractall(tmp, filter="data")
+        img, _, _ = volume.read_series(f"{tmp}/bc855cd8bdc9")
+    rec = embed.embed_image(model, img, max_crops_per_forward=4)
+    assert rec["cls"].shape == (1080,) and np.isfinite(rec["cls"]).all()
+    assert tuple(rec["grid"]) == (4, 4, 1) and rec["crop_desc"].shape == (16, 2160)
+    assert rec["padded_axes"].tolist() == [False, False, True]
