@@ -154,6 +154,7 @@ def embedding_record(uid: str, meta: dict, rec: dict) -> dict:
         "slice_labels": np.asarray(meta["slice_labels"], dtype=np.int8),
         "n_pos_slices": int(meta["n_pos_slices"]),
         "manufacturer": str(meta.get("manufacturer", "unknown")),
+        "scanner": str(meta.get("scanner", meta.get("manufacturer", "unknown"))),
         "slice_thickness_mm": float(meta.get("slice_thickness_mm", np.nan)),
         "n_missing_slices_est": int(meta.get("n_missing_slices_est", 0)),
         "resampled": bool(rec.get("resampled", False)),

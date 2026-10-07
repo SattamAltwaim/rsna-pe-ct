@@ -140,11 +140,23 @@ def read_series(dcm_dir) -> tuple:
     header["slice_thickness_mm"] = _to_float(header["slice_thickness_mm"])
     header["kvp"] = _to_float(header["kvp"])
     header["manufacturer"] = header["manufacturer"] or "unknown"
+    header["scanner"] = scanner_proxy(header["manufacturer"], header["convolution_kernel"])
     header["transfer_syntax"] = str(getattr(first.file_meta, "TransferSyntaxUID", ""))
     header["n_files"] = n
     header["z_positions_true_mm"] = [float(z) for z in z_true]
     header.update(spacing_stats(along))
     return oriented, sop_uids, header
+
+
+def scanner_proxy(manufacturer: str, convolution_kernel: str) -> str:
+    """Manufacturer if present, else the reconstruction kernel name (kernel names are
+    vendor-specific, e.g. ``B30f`` is Siemens, ``STANDARD`` is GE), else ``unknown``.
+    The Manufacturer tag is missing from almost every study in this dataset."""
+    if manufacturer and manufacturer != "unknown":
+        return manufacturer
+    if convolution_kernel:
+        return f"kernel {convolution_kernel}"
+    return "unknown"
 
 
 def spacing_stats(z_true) -> dict:

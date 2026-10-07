@@ -44,7 +44,7 @@ def cells():
         records = storage.load_all_records(cfg.embeddings_dir, progress=tqdm)
         studies = pd.read_parquet(cfg.study_labels_path).set_index("study_uid")
         df = pred.join(studies.drop(columns=["y"]), how="left")
-        df["manufacturer"] = [records[u]["manufacturer"] if u in records else "unknown" for u in df.index]
+        df["scanner"] = [records[u].get("scanner", records[u]["manufacturer"]) if u in records else "unknown" for u in df.index]
         df["error"] = np.select([(df.y == 1) & (df.pred == 0), (df.y == 0) & (df.pred == 1)], ["FN", "FP"], "correct")
         print(df.error.value_counts().to_dict(), "| splits:", df.split.value_counts().to_dict())
         """),
@@ -65,8 +65,8 @@ def cells():
         pd.DataFrame(rows)
         """),
         code("""
-        man = pd.crosstab(df.manufacturer, df.error, normalize="index").round(3)
-        man["n"] = df.manufacturer.value_counts()
+        man = pd.crosstab(df.scanner, df.error, normalize="index").round(3)
+        man["n"] = df.scanner.value_counts()
         man.sort_values("n", ascending=False)
         """),
         md("""
@@ -94,6 +94,8 @@ def cells():
 
         def gallery(uids, title, fname):
             n = len(uids)
+            if n == 0:
+                print(f"no studies for: {title}"); return
             fig, axes = plt.subplots(2, n, figsize=(3.1 * n, 7), squeeze=False)
             for j, u in enumerate(uids):
                 v, m = vols[u]; lab = np.asarray(m["slice_labels"]); band = labels.positive_band(lab)
@@ -172,6 +174,8 @@ def cells():
         code("""
         def heat_panels(uids, title, fname):
             n = len(uids)
+            if n == 0:
+                print(f"no studies for: {title}"); return
             fig, axes = plt.subplots(2, n, figsize=(3.3 * n, 7.5), squeeze=False)
             for j, u in enumerate(uids):
                 v, m = vols[u]; h = heats[u]; lab = np.asarray(m["slice_labels"]); band = labels.positive_band(lab)
@@ -224,7 +228,7 @@ def cells():
         ),
         code("""
         show = top_tp.index.tolist() + top_fn.index.tolist()[:4]
-        fig, axes = plt.subplots(1, len(show), figsize=(2.6 * len(show), 4.5), sharey=False)
+        fig, axes = plt.subplots(1, max(len(show), 1), figsize=(2.6 * max(len(show), 1), 4.5), sharey=False)
         for ax, u in zip(np.atleast_1d(axes), show):
             h = heats[u]; prof = explain.z_profile(h["importance"], h["boxes"], h["shape"][0]); z = np.arange(len(prof))
             ax.plot(np.nan_to_num(prof), z, color=viz.PALETTE[1]); ax.invert_yaxis()
@@ -254,7 +258,7 @@ def cells():
 
         Fill in after running. Suggested structure:
 
-        - **Errors.** Which flags and sub-types are over-represented among FNs and FPs; whether a scanner stands out.
+        - **Errors.** Which flags and sub-types are over-represented among FNs and FPs; whether a scanner (kernel) stands out.
         - **Focus.** z-hit rate vs the random baseline; share of FNs where the model never looked at the band vs looked and declined.
         - **Coverage.** Share of PE studies whose positive band is fully inside the crop grid (clots in the uncovered margin are undetectable by construction).
         - **Next steps.** If recall on small clots is poor and the model does look at the right region: an attention / MIL head

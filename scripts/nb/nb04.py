@@ -43,7 +43,7 @@ def cells():
         uids = [u for u in records if u in split_table.index]
         X = np.stack([records[u]["cls"] for u in uids]).astype(np.float32)
         y = np.array([records[u]["y"] for u in uids])
-        meta = split_table.loc[uids].join(studies.drop(columns=["y"]), how="left")
+        meta = split_table.loc[uids].join(studies.drop(columns=[c for c in studies.columns if c in split_table.columns]), how="left")
         print(X.shape, "embeddings |", f"{y.mean():.1%} PE overall")
         """),
         code("""

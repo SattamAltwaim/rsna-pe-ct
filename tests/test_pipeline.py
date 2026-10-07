@@ -86,6 +86,6 @@ def test_run_embedding_extraction_with_tiny_model(world):
     assert tuple(rec["grid"]) == (4, 4, 1) and rec["boxes_lpi"].shape == (16, 3, 2)
     assert rec["boxes_lpi"][:, 0, :].tolist() == [[0, 8]] * 16
     assert rec["slice_labels"].tolist() == [0, 1, 1, 1, 0, 0, 0, 0] and rec["y"] == 1
-    assert rec["manufacturer"] == "unknown"
+    assert rec["manufacturer"] == "unknown" and rec["scanner"] == "kernel B30f"
     vols = pipeline.fetch_volumes_for_uids(cfg, studies.set_index("study_uid"), [UID], locator, slice_index)
     assert vols[UID][0].shape == (8, 512, 512)

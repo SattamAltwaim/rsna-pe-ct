@@ -146,7 +146,7 @@ def cells():
         for u in sample:
             v, m = store.load_volume(u)
             images.append(volume.coronal_slab(v)); aspects.append(volume.aspect_coronal(m))
-            titles.append(f"{u}  y={m['y']}  {m['manufacturer'][:12]}")
+            titles.append(f"{u}  y={m['y']}  {m.get('scanner', m['manufacturer'])[:14]}")
         fig = viz.image_grid(images, titles, ncols=5, window="vessel", aspects=aspects)
         viz.save_fig(fig, FIG, NOTEBOOK, "coronal_random_volumes");
         """),

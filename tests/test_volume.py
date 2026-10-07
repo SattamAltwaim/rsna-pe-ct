@@ -73,6 +73,7 @@ def test_real_fixture_reads_as_head_first_hu_volume(real_series_dir):
     assert meta["slice_spacing_median_mm"] == pytest.approx(5.0, abs=0.01)
     assert meta["n_missing_slices_est"] == 0
     assert header["kvp"] == 120.0 and header["manufacturer"] == "unknown"
+    assert header["scanner"] == "kernel B30f" and header["transfer_syntax"] == "1.2.840.10008.1.2.1"
     sanity = volume.hu_sanity(vol)
     assert -1100 < sanity["min"] <= -1000 and sanity["frac_air"] > 0.2 and sanity["max"] > 300
     # sop uid in the file name matches the tag SimpleITK reported
@@ -108,7 +109,7 @@ def test_synthetic_series_orientation_is_independent_of_file_order(tmp_path, asc
     for zi, s in enumerate(sop_order):
         k = [i for i, (ss, _) in enumerate(sops) if ss == s][0]
         assert vol[zi, k, :].max() == 500 and vol[zi].max() == 500
-    assert header["manufacturer"] == "TestCo"
+    assert header["manufacturer"] == "TestCo" and header["scanner"] == "TestCo"
     assert meta["slice_spacing_median_mm"] == pytest.approx(2.0)
 
 
@@ -134,6 +135,12 @@ def test_ras_conversion_and_roundtrip(tiny_volume, tmp_path):
     path = volume.save_nifti(img, tmp_path / "v.nii.gz")
     np.testing.assert_array_equal(volume.load_nifti(path), vol)
     assert np.allclose(volume.load_nifti_image(path).GetDirection(), meta["direction"])
+
+
+def test_scanner_proxy():
+    assert volume.scanner_proxy("SIEMENS", "B30f") == "SIEMENS"
+    assert volume.scanner_proxy("unknown", "STANDARD") == "kernel STANDARD"
+    assert volume.scanner_proxy("", "") == "unknown"
 
 
 def test_view_helpers(tiny_volume):

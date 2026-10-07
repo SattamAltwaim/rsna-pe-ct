@@ -70,6 +70,22 @@ Tests run on CPU with synthetic data plus a tiny real fixture (see `tests/fixtur
 for the dataset citation). Code that needs a GPU is written so it also runs on CPU with a tiny
 input, so shape and logic bugs are caught locally.
 
+## Data notes (verified against the public bucket, October 2026)
+
+- `train.csv` has 7,279 studies (1,790,594 slice rows), exactly one series per study; 4,911
+  negative, 2,211 PE-positive, 157 indeterminate (dropped). Its row order does **not** follow
+  slice position, so z-position analyses need assembled volumes.
+- All zip members are deflate-compressed; one DICOM slice is about 525 KB raw, 280 KB compressed.
+- In a random sample of 40 studies: 70 % Implicit VR Little Endian, 22 % Explicit VR, 8 % JPEG
+  Lossless (hence the `pylibjpeg` dependencies); slice thickness 0.625 to 1.25 mm (one 5 mm
+  outlier seen), in-plane 0.5 to 0.84 mm; every study axial.
+- The `Manufacturer` tag is absent from almost every file, so the vendor-specific reconstruction
+  kernel name (`ConvolutionKernel`) is used as the scanner proxy for the shortcut analyses.
+- Some studies have missing slices; the stored volume is the stack of existing slices and the
+  metadata carries the true per-slice positions plus `n_missing_slices_est`.
+- GDCM's series scanner rejects the Implicit-VR files with this dataset's anonymised UIDs, so
+  slices are read with pydicom and the geometry is built from the headers.
+
 ## Conventions
 
 - Stored volumes are `int16` HU arrays `(z, y, x)` in **LPI** orientation: slice 0 is the top

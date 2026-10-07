@@ -58,7 +58,7 @@ def cells():
         acq = pd.DataFrame([{
             "study_uid": u, "y": m["y"], "n_slices": m["shape_zyx"][0],
             "slice_spacing_mm": m["slice_spacing_median_mm"], "inplane_mm": m["spacing_xyz_mm"][0],
-            "manufacturer": m["manufacturer"], "kvp": m["kvp"], "n_missing": m["n_missing_slices_est"],
+            "scanner": m.get("scanner", m["manufacturer"]), "kvp": m["kvp"], "n_missing": m["n_missing_slices_est"],
         } for u, m in metas.items()]).set_index("study_uid")
         pe_uids = [u for u in eda_uids if metas[u]["y"] == 1]
         neg_uids = [u for u in eda_uids if metas[u]["y"] == 0]
@@ -179,20 +179,21 @@ def cells():
         plot_note(
             "Acquisition variability",
             "Four panels over the EDA volumes: number of slices, slice spacing (mm), in-plane pixel size (mm), and "
-            "the scanner manufacturer with the PE rate per manufacturer written above each bar.",
+            "the scanner with the PE rate per scanner written above each bar. The manufacturer tag is missing from "
+            "almost every file in this dataset, so the vendor-specific reconstruction kernel name stands in for it.",
             "Raw scans are inconsistent in resolution, which motivates resampling or a model robust to it. The last "
             "panel is a shortcut check: if one manufacturer contributed mostly PE cases, a model could learn to "
             "recognise the scanner instead of the disease.",
             "Slice spacing clustering at a few standard values; in-plane size varying with patient size. PE rates "
-            "per manufacturer close to the overall prevalence; a manufacturer far from it is a confounder to watch.",
+            "per scanner close to the overall prevalence; a scanner far from it is a confounder to watch.",
         ),
         code("""
         fig, axes = plt.subplots(1, 4, figsize=(17, 3.8))
         axes[0].hist(acq.n_slices, bins=30, color=viz.PALETTE[0]); axes[0].set_title("slices per study")
         axes[1].hist(acq.slice_spacing_mm, bins=30, color=viz.PALETTE[1]); axes[1].set_title("slice spacing (mm)")
         axes[2].hist(acq.inplane_mm, bins=30, color=viz.PALETTE[2]); axes[2].set_title("in-plane pixel size (mm)")
-        man = acq.groupby("manufacturer").agg(n=("y", "size"), pe_rate=("y", "mean")).sort_values("n", ascending=False)
-        viz.bar_counts(axes[3], man["n"], title="scanner manufacturer (PE rate above bars)", annotate=False)
+        man = acq.groupby("scanner").agg(n=("y", "size"), pe_rate=("y", "mean")).sort_values("n", ascending=False)
+        viz.bar_counts(axes[3], man["n"], title="scanner (PE rate above bars)", annotate=False)
         for i, (n, r) in enumerate(zip(man["n"], man["pe_rate"])):
             axes[3].text(i, n, f"{r:.0%}", ha="center", va="bottom", fontsize=8)
         axes[3].tick_params(axis="x", rotation=45)
@@ -273,8 +274,9 @@ def cells():
                 u = max(group, key=lambda u: metas[u]["n_pos_slices"]); v, m = store.load_volume(u)
                 z = labels.representative_positive_slice(m["slice_labels"])
                 pair.append(viz.crop_center(v[z], frac=0.45)); titles.append(f"{name}  {u}  z={z}")
-        fig = viz.image_grid(pair, titles, ncols=2, window="vessel", figsize_per=5)
-        viz.save_fig(fig, FIG, NOTEBOOK, "central_vs_peripheral");
+        if pair:
+            fig = viz.image_grid(pair, titles, ncols=2, window="vessel", figsize_per=5)
+            viz.save_fig(fig, FIG, NOTEBOOK, "central_vs_peripheral")
         """),
         plot_note(
             "Look-alikes",
@@ -322,8 +324,9 @@ def cells():
             lab = np.asarray(metas[u]["slice_labels"]); z = np.where(lab == 1)[0]
             (pos_central if metas[u]["central_pe"] else pos_other).extend(volume.normalized_z(z, len(lab)).tolist())
         fig, ax = plt.subplots(figsize=(8, 3.8))
-        ax.hist(pos_other, bins=40, range=(0, 1), alpha=0.6, color=viz.PALETTE[0], label=f"non-central PE ({len(pos_other)} slices)", density=True)
-        ax.hist(pos_central, bins=40, range=(0, 1), alpha=0.6, color=viz.PALETTE[3], label=f"central PE ({len(pos_central)} slices)", density=True)
+        for pos, color, name in [(pos_other, viz.PALETTE[0], "non-central PE"), (pos_central, viz.PALETTE[3], "central PE")]:
+            if pos:
+                ax.hist(pos, bins=40, range=(0, 1), alpha=0.6, color=color, label=f"{name} ({len(pos)} slices)", density=True)
         ax.set_xlabel("position along the scan (0 = top, 1 = bottom)"); ax.set_ylabel("density"); ax.legend()
         viz.save_fig(fig, FIG, NOTEBOOK, "clot_position_distribution");
         """),
@@ -337,6 +340,8 @@ def cells():
             "scattered or multiple blocks indicate several clots.",
         ),
         code("""
+        from matplotlib.colors import ListedColormap
+
         n_bins = 200
         order = sorted(pe_uids, key=lambda u: metas[u]["n_pos_slices"])
         barcode = np.zeros((len(order), n_bins))
@@ -344,7 +349,7 @@ def cells():
             lab = np.asarray(metas[u]["slice_labels"]); idx = (volume.normalized_z(np.arange(len(lab)), len(lab)) * (n_bins - 1)).astype(int)
             np.maximum.at(barcode[i], idx, lab)
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.imshow(barcode, aspect="auto", cmap=plt.matplotlib.colors.ListedColormap(["white", viz.COLOR_PE]), interpolation="nearest")
+        ax.imshow(barcode, aspect="auto", cmap=ListedColormap(["white", viz.COLOR_PE]), interpolation="nearest")
         ax.set_xlabel("position along the scan (0 = top, 1 = bottom)"); ax.set_ylabel("PE studies, sorted by clot extent")
         ax.set_xticks([0, n_bins // 2, n_bins - 1]); ax.set_xticklabels(["0", "0.5", "1"])
         viz.save_fig(fig, FIG, NOTEBOOK, "clot_barcode");
@@ -352,7 +357,7 @@ def cells():
         learned_cell([
             "(fill in after running) how visible the clots were to you at full resolution vs zoomed in.",
             "(fill in after running) whether the labelled positive range matched the visible clot in the sequence strip (label alignment check).",
-            "(fill in after running) the spread of slice spacing and in-plane resolution, and whether any manufacturer is a PE-rate outlier.",
+            "(fill in after running) the spread of slice spacing and in-plane resolution, and whether any scanner (kernel) is a PE-rate outlier.",
             "(fill in after running) where along the scan the clots concentrate and how central differs from peripheral.",
             "The label file's row order does not follow slice position, so z-position analyses need assembled volumes.",
         ]),

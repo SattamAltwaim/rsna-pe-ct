@@ -166,17 +166,17 @@ def cells():
         records = storage.load_all_records(cfg.embeddings_dir, progress=tqdm)
         X = np.stack([r["cls"] for r in records.values()])
         y = np.array([r["y"] for r in records.values()])
-        man = np.array([r["manufacturer"] for r in records.values()])
+        man = np.array([r.get("scanner", r["manufacturer"]) for r in records.values()])
         print(X.shape, "embeddings |", f"{y.mean():.1%} PE")
         """),
         plot_note(
             "UMAP of scan embeddings",
             "Each point is one study's scan embedding projected to 2D. Left: coloured by PE label. Right: coloured by "
-            "scanner manufacturer.",
-            "If points cluster strongly by manufacturer, the embedding encodes the scanner more than the anatomy, a "
+            "scanner (reconstruction kernel as a proxy, since the manufacturer tag is missing in this dataset).",
+            "If points cluster strongly by scanner, the embedding encodes the scanner more than the anatomy, a "
             "shortcut risk for the classifier. Some separation by PE label would be a very good sign; none is "
             "expected for a subtle disease and is not a failure, since a linear probe can use directions UMAP discards.",
-            "Left: whether PE points concentrate anywhere. Right: whether manufacturers form separate islands "
+            "Left: whether PE points concentrate anywhere. Right: whether scanners form separate islands "
             "(bad) or mix (good).",
         ),
         code("""
@@ -189,7 +189,7 @@ def cells():
         axes[0].legend(); axes[0].set_title("coloured by PE label")
         for i, m in enumerate(pd.Series(man).value_counts().index):
             axes[1].scatter(*emb2[man == m].T, s=6, color=viz.PALETTE[i % 10], label=f"{m} ({(man == m).sum()})", alpha=0.7)
-        axes[1].legend(fontsize=7); axes[1].set_title("coloured by manufacturer")
+        axes[1].legend(fontsize=7); axes[1].set_title("coloured by scanner")
         for ax in axes: ax.set_xticks([]); ax.set_yticks([])
         viz.save_fig(fig, FIG, NOTEBOOK, "umap_embeddings");
         """),
