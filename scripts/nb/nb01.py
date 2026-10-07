@@ -21,8 +21,9 @@ def cells():
           *coronal* cuts it front-to-back (a view from the front), *sagittal* cuts it left-to-right
           (a view from the side).
         - **HU**: Hounsfield units, the calibrated density scale (air -1000, water 0, bone about +1000).
-        - **Series reader**: a library routine that sorts the slice files by physical position,
-          applies the scanner's intensity calibration and assembles the 3D geometry.
+        - **Series assembly**: each slice file is read, the slices are sorted by their physical
+          position, the scanner's intensity calibration is applied, and the 3D geometry (voxel
+          size, origin, orientation) is built from the headers.
         - **z-axis**: the head-to-feet axis. In our stored volumes index 0 is the top of the scan.
         """),
         setup_cell(),

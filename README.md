@@ -22,7 +22,7 @@ pe_ct/                 importable package (all logic lives here)
   io.py                zip index (central directory) + parallel range-request downloads
   labels.py            train.csv -> one row per study, groups, binary target, slice-label alignment
   splits.py            stratified, leak-free test pool / dev subset / EDA subset / folds
-  volume.py            DICOM series -> LPI-oriented int16 HU volume + meta; RAS conversion
+  volume.py            DICOM slices (pydicom) -> LPI-oriented int16 HU volume + meta; RAS conversion
   storage.py           marker-gated tar / npz shards, atomic writes, failure log
   viz.py               windows, slice / orthogonal views, overlays, galleries, slice scroller
   embed.py             SPECTRE loading, preprocessing, extraction, crop-grid geometry
