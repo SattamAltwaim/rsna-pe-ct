@@ -100,6 +100,14 @@ def load_train(cfg: Config) -> pd.DataFrame:
     """``train.csv`` from the output root, fetched from the source the first time."""
     if not cfg.train_csv.exists():
         if cfg.source == "kaggle":
+            if not cfg.kaggle_input:
+                from pe_ct.config import describe_kaggle_inputs
+
+                raise FileNotFoundError(
+                    "no train.csv found under /kaggle/input. Attach the competition dataset "
+                    "(Add Input -> Competitions -> RSNA STR Pulmonary Embolism Detection) and re-run "
+                    "the CONFIG cell. /kaggle/input currently holds:\n" + describe_kaggle_inputs()
+                )
             src = Path(cfg.kaggle_input) / "train.csv"
             storage.atomic_write_bytes(cfg.train_csv, src.read_bytes())
         else:

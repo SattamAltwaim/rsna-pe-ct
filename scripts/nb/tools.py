@@ -87,6 +87,9 @@ def config_cell(notebook: str, extra_lines: str = ""):
     cfg.ensure_dirs()
     if cfg.source == "kaggle":                   # outputs of earlier notebooks attached as inputs
         from pe_ct import colab
+        from pe_ct.config import describe_kaggle_inputs
+        print("competition data:", cfg.kaggle_input or "NOT FOUND - attach it via Add Input -> Competitions")
+        print("/kaggle/input contains:\n" + describe_kaggle_inputs())
         print("linked earlier outputs:", colab.link_kaggle_inputs(cfg))
     viz.use_notebook_style()
     FIG = cfg.figures_dir

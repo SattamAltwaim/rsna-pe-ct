@@ -184,3 +184,23 @@ def test_ensure_eda_volumes_builds_then_noops(kaggle_world):
     stats = pipeline.ensure_eda_volumes(cfg, studies, split_table, None, slice_index, log=lambda *a: None)
     assert stats["done"] == 1
     assert pipeline.ensure_eda_volumes(cfg, studies, split_table, None, slice_index, log=lambda *a: None) is None
+
+
+def test_detect_kaggle_input_handles_nesting_and_absence(tmp_path):
+    from pe_ct.config import describe_kaggle_inputs, detect_kaggle_input
+
+    assert detect_kaggle_input(str(tmp_path)) == ""
+    deep = tmp_path / "competitions" / "rsna-str-pulmonary-embolism-detection"
+    deep.mkdir(parents=True)
+    (deep / "train.csv").write_text("x")
+    other = tmp_path / "some-other-dataset"
+    other.mkdir()
+    (other / "train.csv").write_text("x")
+    assert detect_kaggle_input(str(tmp_path)) == str(deep)  # the PE dataset wins over another train.csv
+    assert "competitions" in describe_kaggle_inputs(str(tmp_path))
+    cfg = Config(source="kaggle", kaggle_input="", drive_root=str(tmp_path / "w"), work_dir=str(tmp_path / "wk"))
+    cfg.ensure_dirs()
+    with pytest.raises(FileNotFoundError, match="Attach the competition dataset"):
+        pipeline.load_train(cfg)
+    with pytest.raises(FileNotFoundError):
+        pipeline.fetch_study(cfg, None, UID, cfg.work)

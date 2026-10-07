@@ -146,6 +146,8 @@ class Config:
 
     def kaggle_study_dir(self, study_uid: str, series_uid: str | None = None) -> Path:
         """``<kaggle_input>/train/<study>/<series>/`` (the series is found by glob if not given)."""
+        if not self.kaggle_input:
+            raise FileNotFoundError("kaggle_input is empty: the competition dataset is not attached")
         study_dir = Path(self.kaggle_input) / "train" / str(study_uid)
         if series_uid:
             return study_dir / str(series_uid)
@@ -155,11 +157,30 @@ class Config:
         return candidates[0]
 
 
-def detect_kaggle_input() -> str:
-    """The mounted competition dataset: the ``/kaggle/input/*`` folder holding ``train.csv``."""
-    hits = sorted(glob.glob("/kaggle/input/*/train.csv"))
-    hits.sort(key=lambda p: ("pulmonary" not in p.lower(), p))
+KAGGLE_INPUT_ROOT = "/kaggle/input"
+
+
+def detect_kaggle_input(root: str = KAGGLE_INPUT_ROOT) -> str:
+    """The mounted competition dataset: the folder (up to 3 levels under ``root``) holding ``train.csv``.
+
+    Competitions usually mount at ``/kaggle/input/<slug>/``, but the depth is not guaranteed.
+    The search is depth-limited on purpose: a recursive glob would walk 1.9M DICOM files.
+    """
+    hits = []
+    for depth in range(1, 4):
+        hits += glob.glob(os.path.join(root, *(["*"] * depth), "train.csv"))
+    hits.sort(key=lambda p: ("pulmonary" not in p.lower(), p.count(os.sep), p))
     return str(Path(hits[0]).parent) if hits else ""
+
+
+def describe_kaggle_inputs(root: str = KAGGLE_INPUT_ROOT, max_entries: int = 12) -> str:
+    """Two levels of ``/kaggle/input`` for error messages ("is the competition attached?")."""
+    lines = []
+    for top in sorted(glob.glob(os.path.join(root, "*")))[:max_entries]:
+        lines.append(top)
+        for sub in sorted(glob.glob(os.path.join(top, "*")))[:max_entries]:
+            lines.append("    " + os.path.basename(sub))
+    return "\n".join(lines) if lines else f"{root} is empty"
 
 
 def default_config() -> Config:
