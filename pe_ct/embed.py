@@ -41,7 +41,10 @@ def load_model(name: str = "spectre-large", device=None, dtype=None, pretrained:
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if dtype is None:
-        dtype = torch.bfloat16 if str(device).startswith("cuda") else torch.float32
+        if str(device).startswith("cuda"):
+            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        else:
+            dtype = torch.float32
     return SpectreImageFeatureExtractor.from_pretrained(name, pretrained=pretrained, device=device, dtype=dtype)
 
 

@@ -37,9 +37,11 @@ def cells():
         from tqdm.auto import tqdm
         from pe_ct import storage, probe
 
+        from pe_ct import pipeline
+
         records = storage.load_all_records(cfg.embeddings_dir, progress=tqdm)
-        split_table = pd.read_parquet(cfg.splits_path).set_index("study_uid")
-        studies = pd.read_parquet(cfg.study_labels_path).set_index("study_uid")
+        studies, split_table = pipeline.ensure_labels_and_splits(cfg)
+        split_table, studies = split_table.set_index("study_uid"), studies.set_index("study_uid")
         uids = [u for u in records if u in split_table.index]
         X = np.stack([records[u]["cls"] for u in uids]).astype(np.float32)
         y = np.array([records[u]["y"] for u in uids])

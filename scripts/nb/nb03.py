@@ -58,13 +58,11 @@ def cells():
         md("## Load splits, labels and the lookup objects"),
         code("""
         import pandas as pd
-        from pe_ct import io as pio, labels, storage
+        from pe_ct import labels, pipeline, storage
 
-        studies = pd.read_parquet(cfg.study_labels_path)
-        split_table = pd.read_parquet(cfg.splits_path)
-        zip_index = pd.read_parquet(cfg.zip_index_path)
-        locator = pio.StudyLocator(zip_index)
-        slice_index = labels.SliceLabelIndex(labels.load_train_csv(cfg.train_csv))
+        studies, split_table = pipeline.ensure_labels_and_splits(cfg)
+        locator = pipeline.make_locator(cfg)
+        slice_index = labels.SliceLabelIndex(pipeline.load_train(cfg))
         dev_uids = split_table.loc[split_table.in_dev, "study_uid"].tolist()
         test_uids = split_table.loc[split_table.in_test_sample, "study_uid"].tolist()
         print(len(dev_uids), "dev |", len(test_uids), "test sample")
@@ -72,18 +70,17 @@ def cells():
         md("""
         ## What the model sees
 
-        One EDA volume (already on Drive) is pushed through the model's preprocessing and the crop
-        grid is drawn on top.
+        One PE-positive EDA study is pushed through the model's preprocessing and the crop grid
+        is drawn on top.
         """),
         code("""
         from tqdm.auto import tqdm
         from pe_ct import volume
 
-        storage.prepare_local(cfg.volumes_eda_dir, cfg.work / "volumes_eda", progress=tqdm)
-        store = storage.VolumeStore(cfg.work / "volumes_eda" / "cache")
-        demo_uid = next(u for u in store.uids() if store.load_meta(u)["y"] == 1)
-        demo_vol, demo_meta = store.load_volume(demo_uid)
-        demo_img = volume.array_to_image(demo_vol, demo_meta)
+        by_uid = studies.set_index("study_uid")
+        demo_uid = split_table.loc[split_table.in_eda & (split_table.y == 1), "study_uid"].iloc[0]
+        demo_img, demo_meta, _ = pipeline.process_study(cfg, locator, slice_index, demo_uid, by_uid.loc[demo_uid], cfg.work / "dicom")
+        demo_vol = volume.image_to_hu_array(demo_img)
         tensor, prep = embed.prepare_input(demo_img, cfg.resample_spacing)
         layout = embed.crop_layout(prep["ras_shape"], info["crop_size"])
         boxes = embed.crop_boxes_lpi(layout)
@@ -121,9 +118,7 @@ def cells():
         """),
         code("""
         import time
-        from pe_ct import pipeline
 
-        by_uid = studies.set_index("study_uid")
         for uid in dev_uids[:3]:
             t0 = time.time()
             image, meta, timings = pipeline.process_study(cfg, locator, slice_index, uid, by_uid.loc[uid], cfg.work / "dicom")
@@ -134,10 +129,12 @@ def cells():
         md("""
         ## Main loop (resumable, streaming)
 
-        Fetch -> volume -> embed -> append to the current shard -> delete the DICOMs. While the GPU
-        embeds one study, background threads fetch and decode the next ones. Finished shards are
-        copied to Drive with their marker; failures are logged with the reason and skipped on re-runs.
-        The occlusion baseline (the descriptor of a crop of pure air) is saved once alongside.
+        Fetch -> volume -> embed -> append to the current shard (downloaded DICOMs are deleted).
+        While the GPU embeds one study, background threads fetch and decode the next ones. Finished
+        shards are moved to the output folder with their marker; failures are logged with the
+        reason and skipped on re-runs. The occlusion baseline (the descriptor of a crop of pure
+        air) is saved once alongside. On Kaggle, *Save Version* when this is done and attach the
+        notebook's output to the probe and error notebooks.
         """),
         code("""
         import numpy as np

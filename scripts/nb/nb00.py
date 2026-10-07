@@ -10,12 +10,18 @@ def cells():
         md("""
         # 00 - Setup and splits
 
-        **Goal.** Download the label file, index the remote zip once, collapse the slice
-        labels into one row per CT study, and freeze leak-free train / validation / test
-        splits *before looking at a single image*.
+        **Goal.** Load the label file, collapse the slice labels into one row per CT study, and
+        freeze leak-free train / validation / test splits *before looking at a single image*.
 
-        Everything downstream (volumes, embeddings, the linear probe, the error analysis)
-        reads the split table written here, so this notebook runs once.
+        Everything downstream (volumes, embeddings, the linear probe, the error analysis) reads
+        the split table written here. The splits are seeded, so later notebooks rebuild the
+        identical table if they cannot find it (useful on Kaggle, where each notebook has its
+        own output folder).
+
+        **Data source.** On Colab the DICOMs are streamed from the public S3 zip with byte-range
+        requests and outputs go to Google Drive. On Kaggle the competition dataset is mounted
+        read-only under `/kaggle/input` and outputs go to `/kaggle/working` (persisted as the
+        notebook's output when you *Save Version*). The code detects which one it is on.
         """),
         md("""
         ## CT scans for ML engineers (read once)
@@ -60,38 +66,33 @@ def cells():
         md("""
         ## Labels: `train.csv`
 
-        The label file lives inside the dataset zip (one row per slice). We fetch just that
-        member with an HTTP range request and keep a copy on Drive.
+        One row per slice. On Kaggle it is copied from the mounted competition dataset; on Colab
+        just that member is fetched from the dataset zip with an HTTP range request.
         """),
         code("""
-        from pe_ct import io as pio, labels, storage
+        from pe_ct import labels, pipeline, storage
 
-        if not cfg.train_csv.exists():
-            storage.atomic_write_bytes(cfg.train_csv, pio.read_member_bytes(cfg.zip_url, "train.csv"))
-        train = labels.load_train_csv(cfg.train_csv)
+        train = pipeline.load_train(cfg)
         print(train.shape, "slice rows |", train.StudyInstanceUID.nunique(), "studies")
         train.head(3)
         """),
         md("""
-        ## Zip index
+        ## Zip index (S3 source only)
 
-        The dataset is one huge zip. Zip members are stored contiguously, so a member can be
-        fetched with a byte-range request once its offset is known. Reading the central directory
-        (millions of entries) takes a minute, so we do it once and save the result as a parquet
-        table. The compression-type counts tell us whether members are stored raw or deflated,
-        which decides how we decode them.
+        When the DICOMs are streamed from the public zip, each file is fetched with a byte-range
+        request, which needs the member offsets from the zip's central directory. Reading it
+        (millions of entries) takes a minute, so it is done once and saved as a parquet table.
+        On Kaggle the files are already on disk and this step is skipped.
         """),
         code("""
-        import pandas as pd
-
-        if cfg.zip_index_path.exists():
+        locator = pipeline.make_locator(cfg)
+        if locator is not None:
+            import pandas as pd
             zip_index = pd.read_parquet(cfg.zip_index_path)
+            print(len(zip_index), "entries |", zip_index.is_dcm.sum(), "DICOM files")
+            print("compression types (0 = stored, 8 = deflate):", zip_index.compress_type.value_counts().to_dict())
         else:
-            zip_index = pio.build_zip_index(cfg.zip_url)
-            storage.atomic_write_parquet(zip_index, cfg.zip_index_path)
-        print(len(zip_index), "entries |", zip_index.is_dcm.sum(), "DICOM files")
-        print("compression types (0 = stored, 8 = deflate):", zip_index.compress_type.value_counts().to_dict())
-        print("DICOM files per split:", zip_index.loc[zip_index.is_dcm, "split"].value_counts().to_dict())
+            print("Kaggle source: DICOMs are read from", cfg.kaggle_input)
         """),
         md("""
         ## One row per study
@@ -169,7 +170,7 @@ def cells():
         learned_cell([
             "The usable dataset is a few thousand studies with roughly a 30 % PE prevalence; the class imbalance is moderate, not extreme.",
             "A typical study has a couple of hundred slices and a PE study has a few dozen positive slices, but the range is huge (from a single slice to almost the whole scan).",
-            "All zip members are deflate-compressed, so each DICOM must be inflated after its range request (about half the raw size travels over the network).",
+            "On the S3 source every zip member is deflate-compressed, so each DICOM is inflated after its range request (about half the raw size travels over the network); on Kaggle the files are read directly.",
             "The test pool is frozen here and must not be opened again until the last cell of the linear-probe notebook.",
             "(fill in after running) anything surprising in the split summary table.",
         ]),

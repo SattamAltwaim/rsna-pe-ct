@@ -8,10 +8,13 @@ TITLE = "01_download_subset"
 def cells():
     return [
         md("""
-        # 01 - Download the EDA subset
+        # 01 - Build the EDA subset
 
-        **Goal.** Turn zipped DICOM slices into clean 3D volumes in Hounsfield units, with the
-        slice labels aligned to the volume's z-axis, and store them on Drive in shards.
+        **Goal.** Turn DICOM slices into clean 3D volumes in Hounsfield units, with the slice
+        labels aligned to the volume's z-axis, and store them in shards (on Drive, or in the
+        Kaggle output folder). On Colab the slices are streamed from the public zip; on Kaggle
+        they are read from the mounted dataset, so this notebook is optional there: the EDA
+        notebook builds any missing volume itself.
 
         Glossary for this notebook:
 
@@ -36,23 +39,22 @@ def cells():
         md("""
         ## Load the split table and select the EDA subset
 
-        We also build two lookup objects: one that maps a study to its byte offsets in the zip,
-        and one that maps a study to its per-slice labels.
+        We also build two lookup objects: one that locates a study's files (byte offsets in the
+        zip on the S3 source; nothing needed on Kaggle), and one that maps a study to its
+        per-slice labels.
         """),
         code("""
         import pandas as pd
-        from pe_ct import io as pio, labels
+        from pe_ct import labels, pipeline
 
-        split_table = pd.read_parquet(cfg.splits_path)
-        studies = pd.read_parquet(cfg.study_labels_path)
+        studies, split_table = pipeline.ensure_labels_and_splits(cfg)
         eda_uids = split_table.loc[split_table.in_eda, "study_uid"].tolist()
         print(len(eda_uids), "EDA studies |", int(split_table.loc[split_table.in_eda, "y"].sum()), "PE positive")
         """),
         code("""
-        zip_index = pd.read_parquet(cfg.zip_index_path)
-        locator = pio.StudyLocator(zip_index)
-        slice_index = labels.SliceLabelIndex(labels.load_train_csv(cfg.train_csv))
-        print(len(locator.study_uids), "studies indexed")
+        locator = pipeline.make_locator(cfg)          # zip offsets (S3) or None (Kaggle)
+        slice_index = labels.SliceLabelIndex(pipeline.load_train(cfg))
+        print("source:", cfg.source)
         """),
         md("""
         ## One study through the pipeline
@@ -62,7 +64,7 @@ def cells():
         near -1000; contrast-filled vessels and bone must reach several hundred).
         """),
         code("""
-        from pe_ct import pipeline, volume
+        from pe_ct import volume
 
         uid = eda_uids[0]
         image, meta, timings = pipeline.process_study(cfg, locator, slice_index, uid, studies.set_index("study_uid").loc[uid], cfg.work / "dicom")
@@ -91,10 +93,11 @@ def cells():
         md("""
         ## Build the EDA volumes (resumable)
 
-        Each study is fetched with parallel range requests to local disk, decoded into a volume,
-        appended to the current shard and its DICOM files deleted. A shard is copied to Drive and
-        gets its `.done.json` marker only when complete, so a disconnected session loses at most
-        one partial shard. Studies that fail are logged with the reason and skipped on re-runs.
+        Each study is fetched (parallel range requests on the S3 source; read in place on Kaggle),
+        decoded into a volume and appended to the current shard; downloaded DICOM files are
+        deleted afterwards. A shard is moved to the output folder and gets its `.done.json`
+        marker only when complete, so a disconnected session loses at most one partial shard.
+        Studies that fail are logged with the reason and skipped on re-runs.
         """),
         code("""
         from tqdm.auto import tqdm
@@ -116,7 +119,7 @@ def cells():
         secs = np.array(stats["seconds"]) if stats["seconds"] else np.array([np.nan])
         print(f"done this run: {stats['done']} | failed: {stats['failed']} | stored in total: {len(done_uids)} of {len(eda_uids)}")
         print(f"seconds per study: median {np.nanmedian(secs):.1f} | mean {np.nanmean(secs):.1f}")
-        print(f"GB written this run: {stats['bytes'] / 2**30:.2f} | Drive free: {colab.free_space_gb(cfg.root)} GB")
+        print(f"GB written this run: {stats['bytes'] / 2**30:.2f} | output free: {colab.free_space_gb(cfg.root)} GB")
         failure_log.df.tail()
         """),
         md("""

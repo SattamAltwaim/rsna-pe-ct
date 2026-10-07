@@ -6,6 +6,7 @@ that must never change (HU reference values, the bucket URL) are module-level.
 
 from __future__ import annotations
 
+import glob
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +45,10 @@ class Config:
     drive_root: str = "/content/drive/MyDrive/rsna-pe"
     work_dir: str = "/content/work"
     zip_url: str = ZIP_URL
+    # Where the DICOMs come from: "s3" = range requests into the public zip (Colab),
+    # "kaggle" = the competition dataset mounted read-only under /kaggle/input.
+    source: str = "s3"
+    kaggle_input: str = ""
     seed: int = 0
 
     # Splits (NB00)
@@ -139,9 +144,33 @@ class Config:
     def failures_csv(self, notebook: str) -> Path:
         return self.results_dir / f"failures_{notebook}.csv"
 
+    def kaggle_study_dir(self, study_uid: str, series_uid: str | None = None) -> Path:
+        """``<kaggle_input>/train/<study>/<series>/`` (the series is found by glob if not given)."""
+        study_dir = Path(self.kaggle_input) / "train" / str(study_uid)
+        if series_uid:
+            return study_dir / str(series_uid)
+        candidates = sorted(p for p in study_dir.glob("*") if p.is_dir())
+        if len(candidates) != 1:
+            raise FileNotFoundError(f"{len(candidates)} series directories under {study_dir}")
+        return candidates[0]
+
+
+def detect_kaggle_input() -> str:
+    """The mounted competition dataset: the ``/kaggle/input/*`` folder holding ``train.csv``."""
+    hits = sorted(glob.glob("/kaggle/input/*/train.csv"))
+    hits.sort(key=lambda p: ("pulmonary" not in p.lower(), p))
+    return str(Path(hits[0]).parent) if hits else ""
+
 
 def default_config() -> Config:
-    """Colab paths on Colab; a local ``./data`` tree on a workstation."""
+    """Kaggle paths on Kaggle, Colab paths on Colab, a local ``./data`` tree on a workstation."""
+    if os.path.exists("/kaggle/input"):
+        return Config(
+            source="kaggle",
+            kaggle_input=detect_kaggle_input(),
+            drive_root="/kaggle/working/rsna-pe",   # persisted as the notebook's output
+            work_dir="/tmp/pe_ct_work",              # scratch, not persisted
+        )
     if os.path.exists("/content"):
         return Config()
     local = Path(os.environ.get("PE_CT_DATA", Path.cwd() / "data")).resolve()

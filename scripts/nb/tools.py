@@ -35,11 +35,18 @@ def setup_cell(branch: str = "main"):
     return code(f'''
     import os, sys, subprocess
 
+    # Python 3.13 removed 'imp' but IPython's autoreload still imports it
+    if sys.version_info >= (3, 13) and "imp" not in sys.modules:
+        import importlib, types
+        imp_mock = types.ModuleType("imp"); imp_mock.reload = importlib.reload; sys.modules["imp"] = imp_mock
+
     BRANCH = "{branch}"
     REPO = "{REPO_URL}"
-    DEST = "/content/rsna-pe-ct"
+    ON_KAGGLE = os.path.exists("/kaggle/input")
+    ON_COLAB = os.path.exists("/content") and not ON_KAGGLE
+    DEST = "/kaggle/working/rsna-pe-ct" if ON_KAGGLE else "/content/rsna-pe-ct"
 
-    if os.path.exists("/content"):                       # on Colab
+    if ON_COLAB or ON_KAGGLE:                            # hosted: clone or fast-forward, install
         if not os.path.exists(DEST):
             subprocess.run(["git", "clone", "--branch", BRANCH, REPO, DEST], check=True)
         else:
@@ -48,7 +55,8 @@ def setup_cell(branch: str = "main"):
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", DEST], check=True)
         if DEST not in sys.path:
             sys.path.insert(0, DEST)
-        from google.colab import drive; drive.mount("/content/drive")
+        if ON_COLAB:
+            from google.colab import drive; drive.mount("/content/drive")
     else:                                                # local fallback (Mac)
         parent = os.path.abspath(os.path.join(os.getcwd(), ".."))
         if os.path.exists(os.path.join(parent, "pe_ct")) and parent not in sys.path:
@@ -71,12 +79,15 @@ def config_cell(notebook: str, extra_lines: str = ""):
     from pe_ct import viz
 
     NOTEBOOK = "{notebook}"
-    cfg = default_config()                       # Drive paths on Colab, ./data locally
+    cfg = default_config()                       # Kaggle: mounted dataset + /kaggle/working; Colab: S3 + Drive; local: ./data
     SMOKE = os.environ.get("PE_CT_SMOKE") == "1" # tiny sizes for a quick end-to-end check
     if SMOKE:
         cfg.n_eda, cfg.n_dev, cfg.n_test_sample, cfg.shard_size = 4, 60, 20, 10
     {extra_lines}
     cfg.ensure_dirs()
+    if cfg.source == "kaggle":                   # outputs of earlier notebooks attached as inputs
+        from pe_ct import colab
+        print("linked earlier outputs:", colab.link_kaggle_inputs(cfg))
     viz.use_notebook_style()
     FIG = cfg.figures_dir
     print(cfg)

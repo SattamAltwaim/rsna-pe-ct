@@ -40,9 +40,12 @@ def cells():
         from tqdm.auto import tqdm
         from pe_ct import storage, labels
 
+        from pe_ct import pipeline
+
         pred = pd.read_parquet(cfg.results_dir / "predictions.parquet").set_index("uid")
         records = storage.load_all_records(cfg.embeddings_dir, progress=tqdm)
-        studies = pd.read_parquet(cfg.study_labels_path).set_index("study_uid")
+        studies, _ = pipeline.ensure_labels_and_splits(cfg)
+        studies = studies.set_index("study_uid")
         df = pred.join(studies.drop(columns=["y"]), how="left")
         df["scanner"] = [records[u].get("scanner", records[u]["manufacturer"]) if u in records else "unknown" for u in df.index]
         df["error"] = np.select([(df.y == 1) & (df.pred == 0), (df.y == 0) & (df.pred == 1)], ["FN", "FP"], "correct")
@@ -74,17 +77,15 @@ def cells():
 
         The most confident false negatives (PE scans with the lowest scores), the most confident false
         positives (negative scans with the highest scores), and two confident true positives for
-        reference. Only these few studies are re-downloaded.
+        reference. Only these few studies are fetched again.
         """),
         code("""
-        from pe_ct import io as pio, pipeline
-
         top_fn = df[df.error == "FN"].sort_values("prob").head(N_GALLERY)
         top_fp = df[df.error == "FP"].sort_values("prob", ascending=False).head(N_GALLERY)
         top_tp = df[(df.y == 1) & (df.error == "correct")].sort_values("prob", ascending=False).head(2)
         wanted = list(dict.fromkeys(top_tp.index.tolist() + top_fn.index.tolist() + top_fp.index.tolist()))
-        locator = pio.StudyLocator(pd.read_parquet(cfg.zip_index_path))
-        slice_index = labels.SliceLabelIndex(labels.load_train_csv(cfg.train_csv))
+        locator = pipeline.make_locator(cfg)
+        slice_index = labels.SliceLabelIndex(pipeline.load_train(cfg))
         vols = pipeline.fetch_volumes_for_uids(cfg, studies, wanted, locator, slice_index, progress=tqdm)
         print(len(vols), "volumes fetched")
         """),

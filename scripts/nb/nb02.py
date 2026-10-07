@@ -37,17 +37,20 @@ def cells():
         md("""
         ## Load labels, splits and the EDA volumes
 
-        The finished volume shards are copied from Drive to local disk once (fast random access
-        afterwards). Volumes are read through a small store object, so no cell handles tar files.
+        Any EDA volume that the previous notebook did not build is built here first (on Kaggle
+        that is the normal path: the DICOMs are already on disk). The finished shards are then
+        copied to local disk once (fast random access afterwards). Volumes are read through a
+        small store object, so no cell handles tar files.
         """),
         code("""
         import numpy as np
         import pandas as pd
         from tqdm.auto import tqdm
-        from pe_ct import labels, storage, volume
+        from pe_ct import labels, pipeline, storage, volume
 
-        studies = pd.read_parquet(cfg.study_labels_path)
-        split_table = pd.read_parquet(cfg.splits_path)
+        studies, split_table = pipeline.ensure_labels_and_splits(cfg)
+        slice_index = labels.SliceLabelIndex(pipeline.load_train(cfg))
+        pipeline.ensure_eda_volumes(cfg, studies, split_table, pipeline.make_locator(cfg), slice_index, progress=tqdm)
         storage.prepare_local(cfg.volumes_eda_dir, cfg.work / "volumes_eda", progress=tqdm)
         store = storage.VolumeStore(cfg.work / "volumes_eda" / "cache")
         eda_uids = store.uids()

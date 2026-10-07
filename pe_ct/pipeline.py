@@ -38,8 +38,21 @@ def study_meta_from_row(study_row) -> dict:
     return out
 
 
-def fetch_study(cfg: Config, locator: pio.StudyLocator, study_uid: str, work_dir) -> Path:
-    """Download one study's DICOMs into ``work_dir/<uid>/``; returns that directory."""
+def fetch_study(cfg: Config, locator, study_uid: str, work_dir, series_uid: str | None = None) -> tuple:
+    """Where one study's DICOM files are: ``(directory, owned)``.
+
+    * ``source == "kaggle"``: the read-only series folder of the mounted dataset (not owned,
+      never deleted).
+    * ``source == "s3"``: downloaded into ``work_dir/<uid>/`` with range requests (owned,
+      deleted by the caller after use).
+    """
+    if cfg.source == "kaggle":
+        d = cfg.kaggle_study_dir(study_uid, series_uid)
+        if not d.is_dir():
+            raise FileNotFoundError(f"{d} not found in the mounted dataset")
+        return d, False
+    if locator is None:
+        raise ValueError("an s3 source needs a StudyLocator (zip index)")
     if study_uid not in locator:
         raise KeyError(f"{study_uid} not in zip index")
     entries = locator.entries(study_uid)
@@ -47,7 +60,7 @@ def fetch_study(cfg: Config, locator: pio.StudyLocator, study_uid: str, work_dir
     if dest.exists():
         shutil.rmtree(dest)
     pio.download_study(cfg.zip_url, entries, dest, workers=cfg.download_workers, retries=cfg.download_retries)
-    return dest
+    return dest, True
 
 
 def build_volume(dcm_dir, study_uid: str, study_row, slice_labels) -> tuple:
@@ -67,14 +80,59 @@ def process_study(cfg: Config, locator, slice_index: plabels.SliceLabelIndex, st
     """
     uid = str(study_uid)
     t0 = time.time()
-    dcm_dir = fetch_study(cfg, locator, uid, work_dir)
+    dcm_dir, owned = fetch_study(cfg, locator, uid, work_dir, series_uid=str(study_row["series_uid"]))
     t1 = time.time()
     try:
         image, meta = build_volume(dcm_dir, uid, study_row, slice_index.for_study(uid))
     finally:
-        shutil.rmtree(dcm_dir, ignore_errors=True)
+        if owned:
+            shutil.rmtree(dcm_dir, ignore_errors=True)
     timings = {"t_download_s": round(t1 - t0, 2), "t_decode_s": round(time.time() - t1, 2)}
     return image, meta, timings
+
+
+# ---------------------------------------------------------------------------
+# labels, splits and the study locator (built on demand, deterministic)
+# ---------------------------------------------------------------------------
+
+
+def load_train(cfg: Config) -> pd.DataFrame:
+    """``train.csv`` from the output root, fetched from the source the first time."""
+    if not cfg.train_csv.exists():
+        if cfg.source == "kaggle":
+            src = Path(cfg.kaggle_input) / "train.csv"
+            storage.atomic_write_bytes(cfg.train_csv, src.read_bytes())
+        else:
+            storage.atomic_write_bytes(cfg.train_csv, pio.read_member_bytes(cfg.zip_url, "train.csv"))
+    return plabels.load_train_csv(cfg.train_csv)
+
+
+def ensure_labels_and_splits(cfg: Config, log=print) -> tuple:
+    """``(studies, split_table)``: read if present, otherwise rebuilt (seeded, so identical)."""
+    from pe_ct import splits as psplits
+
+    if cfg.study_labels_path.exists() and cfg.splits_path.exists():
+        return pd.read_parquet(cfg.study_labels_path), pd.read_parquet(cfg.splits_path)
+    log("labels/splits not found: building them from train.csv")
+    studies = plabels.study_table(load_train(cfg))
+    storage.atomic_write_parquet(studies, cfg.study_labels_path)
+    split_table = psplits.make_splits(plabels.usable_studies(studies), cfg)
+    psplits.check_no_leakage(split_table)
+    storage.atomic_write_parquet(split_table, cfg.splits_path)
+    return studies, split_table
+
+
+def make_locator(cfg: Config, log=print):
+    """``StudyLocator`` over the zip index for the s3 source (built once); ``None`` on Kaggle."""
+    if cfg.source == "kaggle":
+        return None
+    if cfg.zip_index_path.exists():
+        index = pd.read_parquet(cfg.zip_index_path)
+    else:
+        log("zip index not found: reading the zip central directory (about a minute)")
+        index = pio.build_zip_index(cfg.zip_url)
+        storage.atomic_write_parquet(index, cfg.zip_index_path)
+    return pio.StudyLocator(index)
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +183,16 @@ def run_volume_download(cfg: Config, studies, uids, locator, slice_index, failur
         if path is not None:
             log(f"shard written: {path.name}")
     return stats
+
+
+def ensure_eda_volumes(cfg: Config, studies, split_table, locator, slice_index, progress=None, log=print):
+    """Build any EDA volume shard that is missing (no-op when NB01 already ran). Returns stats or None."""
+    uids = split_table.loc[split_table["in_eda"], "study_uid"].tolist()
+    failure_log = storage.FailureLog(cfg.failures_csv("01_download_subset"))
+    if not pending_uids(uids, cfg.volumes_eda_dir, "tar", failure_log):
+        return None
+    log("EDA volumes incomplete: building them now")
+    return run_volume_download(cfg, studies, uids, locator, slice_index, failure_log, progress=progress, log=log)
 
 
 def storage_json(meta: dict) -> bytes:
