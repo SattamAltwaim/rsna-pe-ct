@@ -15,10 +15,14 @@ preceded by what you are looking at, why it matters and what to look for.
 | Notebook | What it does | Runtime |
 |---|---|---|
 | `notebooks/01_eda.ipynb` | labels, frozen splits, what scans and clots look like, where clots sit | CPU, minutes |
-| `notebooks/02_finetune.ipynb` | frozen backbone once (cached descriptors), fine-tune combiner + MLP, 5-fold CV, test once | GPU; extraction is the slow part |
+| `notebooks/02_finetune.ipynb` | frozen backbone once (one npz per study), fine-tune combiner (LoRA / last blocks) + MLP, 5-fold CV, test once | GPU; extraction is the slow part |
+
+`02_finetune.ipynb` is **self-contained**: it only pip-installs libraries and every function it
+uses is defined in its own cells (reading a study, the backbone pass, LoRA, the training loop,
+metrics). `01_eda.ipynb` uses the `pe_ct` package (its first cell clones this repo).
 
 Setup on Kaggle, per notebook: Add Input -> Competitions -> RSNA STR Pulmonary Embolism
-Detection; Internet on (the first cell clones and installs this repo); GPU for 02. The code
+Detection; Internet on (pip installs); GPU for 02. The code
 detects Kaggle: DICOMs are read from `/kaggle/input/competitions/rsna-str-pulmonary-embolism-detection/`,
 outputs go to `/kaggle/working/rsna-pe/`, scratch to `/tmp`. Nothing is copied or archived.
 Labels and the seeded splits are rebuilt by whichever notebook runs first, so the two are
@@ -26,7 +30,8 @@ independent. Subset sizes live in `pe_ct/config.py` (`n_dev`, `n_test_sample`, `
 overridden in a notebook's CONFIG cell.
 
 `notebooks/legacy_colab/` holds the earlier six-notebook Colab/Drive series (S3 streaming,
-tar shards, linear probe, heatmaps); it still works but is not the current workflow.
+tar shards, linear probe, heatmaps) and the package-based variant of the fine-tuning notebook;
+they still work but are not the current workflow.
 
 ## Layout
 
