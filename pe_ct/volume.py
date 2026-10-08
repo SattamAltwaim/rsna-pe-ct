@@ -52,18 +52,37 @@ def _header_value(ds, keyword: str, default=""):
     return str(value).strip()
 
 
+READ_THREADS = 32
+
+
+def read_dicom_files(files, stop_before_pixels: bool = False, threads: int = READ_THREADS) -> list:
+    """Read many DICOM files: bytes fetched in parallel threads, parsed in order.
+
+    On Kaggle the dataset is a network-backed mount where per-file latency, not
+    bandwidth, dominates; reading a study's ~230 files one by one costs many
+    seconds, in parallel it costs well under one.
+    """
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+
+    import pydicom
+
+    files = [str(f) for f in files]
+    with ThreadPoolExecutor(max_workers=max(1, min(threads, len(files)))) as pool:
+        blobs = list(pool.map(lambda f: Path(f).read_bytes(), files))
+    return [pydicom.dcmread(io.BytesIO(b), stop_before_pixels=stop_before_pixels) for b in blobs]
+
+
 def _read_sorted_datasets(dcm_dir, stop_before_pixels: bool) -> tuple:
     """All slices of one series sorted by position along the slice normal, plus geometry.
 
     Returns ``(datasets, positions, along, geometry)`` where ``geometry`` holds the
     in-plane spacing, the slice step and the direction matrix (columns = image axes in LPS).
     """
-    import pydicom
-
     files = sorted(Path(dcm_dir).glob("*.dcm"))
     if not files:
         raise IOError(f"no DICOM files in {dcm_dir}")
-    datasets = [pydicom.dcmread(str(f), stop_before_pixels=stop_before_pixels) for f in files]
+    datasets = read_dicom_files(files, stop_before_pixels=stop_before_pixels)
 
     series = {str(ds.get("SeriesInstanceUID", "")) for ds in datasets}
     if len(series) != 1:

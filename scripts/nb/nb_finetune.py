@@ -78,17 +78,32 @@ def cells():
         md("""
         ## Stage A: run the frozen backbone once
 
-        Every dev and test study is read from disk, oriented, tiled into crops and pushed through
-        the frozen backbone; the per-crop descriptors (what the combiner consumes) are stored in
-        small shards. The loop is resumable: studies already in a finished shard are skipped,
-        failures are logged with the reason. This is the only slow part of the notebook.
+        Every dev and test study is read from disk (its files in parallel), oriented, tiled into
+        crops and pushed through the frozen backbone; the per-crop descriptors (what the combiner
+        consumes, a few hundred KB per study) are kept in small npz files so a dropped session
+        resumes where it stopped. Nothing else is written. This is the only slow part of the
+        notebook, so the next cell times a few studies first and prints the expected total.
+        """),
+        code("""
+        import time
+
+        by_uid = studies.set_index("study_uid")
+        timings = []
+        for uid in dev_uids[:3]:
+            t0 = time.time()
+            image, meta, t = pipeline.process_study(cfg, locator, slice_index, uid, by_uid.loc[uid], cfg.work / "dicom")
+            rec = embed.embed_image(model, image, cfg.resample_spacing)
+            timings.append({"read+decode_s": t["t_download_s"] + t["t_decode_s"], "gpu_s": rec["t_gpu_s"], "total_s": time.time() - t0, "crops": rec["n_crops"]})
+        timings = pd.DataFrame(timings); per_study = timings.total_s.mean()
+        print(timings.round(2).to_string())
+        print(f"about {per_study:.1f} s per study -> roughly {per_study * (len(dev_uids) + len(test_uids)) / 60:.0f} min for {len(dev_uids) + len(test_uids)} studies (reads overlap the GPU in the real loop, so usually less)")
         """),
         code("""
         air_path = cfg.embeddings_dir / "air_descriptor.npy"
         if not air_path.exists():
             storage.atomic_write_npy(air_path, embed.air_descriptor(model).astype(np.float32))
         failure_log = storage.FailureLog(cfg.failures_csv(NOTEBOOK))
-        stats = pipeline.run_embedding_extraction(cfg, model, studies, dev_uids + test_uids, locator, slice_index, failure_log, prefetch=2, progress=tqdm)
+        stats = pipeline.run_embedding_extraction(cfg, model, studies, dev_uids + test_uids, locator, slice_index, failure_log, prefetch=3, progress=tqdm)
         """),
         code("""
         done = storage.done_uids(cfg.embeddings_dir, "npz")
